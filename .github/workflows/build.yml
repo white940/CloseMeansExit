@@ -78,7 +78,7 @@ jobs:
           retention-days: 14
 
   release:
-    name: Publish tagged release
+    name: Publish tagged Beta prerelease
     if: startsWith(github.ref, 'refs/tags/v')
     needs: windows-build
     runs-on: ubuntu-latest
@@ -103,9 +103,15 @@ jobs:
           cd release-assets
           sha256sum CloseMeansExit-*.zip > SHA256SUMS
           sha256sum --check SHA256SUMS
+          notes_file="../docs/RELEASE-0.2.2-beta.1.md"
           if ! gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag \
-              --title "CloseMeansExit $RELEASE_TAG" \
-              --notes "Windows portable preview. Extract the ZIP before running. Read the README before enabling force-termination rules."
+              --prerelease --latest=false \
+              --title "CloseMeansExit $RELEASE_TAG · Beta" \
+              --notes-file "$notes_file"
+          else
+            gh release edit "$RELEASE_TAG" --prerelease --latest=false \
+              --title "CloseMeansExit $RELEASE_TAG · Beta" \
+              --notes-file "$notes_file"
           fi
           gh release upload "$RELEASE_TAG" CloseMeansExit-*.zip SHA256SUMS --clobber

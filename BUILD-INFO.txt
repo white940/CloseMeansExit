@@ -1,13 +1,13 @@
-CloseMeansExit 0.2.2 — Steam 兼容修复预览
+CloseMeansExit 0.2.2-beta.1 — Beta 测试版（源码说明）
 日期：2026-10-31
-源码基线：0.2.0，原始提交 3a5ea11a23be2673c7aa0d54486d7718838deaf7；含后续本地修复。本文件记录便携包构建时的状态，后续源码快照以本地 Git 提交和版本标签为准。
-构建：.NET SDK 10.0.403，Windows x64，自包含单文件，无需另装 .NET。
-修复：核验 Steam helper 的完整安装路径和真实祖先身份后映射到 Steam.exe；显式关闭按钮兼容提示；保留快速点击异步身份捕获及原输入时间；Steam 子进程范围明确选择。
-授权：不自动迁移或扩大旧 helper 规则；新规则、兼容修复和范围变更只影响未来关闭。系统进程、其他窗口、PID/创建时间/路径及父子关系保护保留。
-已运行：Release 构建零警告零错误；207 条核心断言；Windows 原生保护、真实轮询与提醒保存链路；兼容修复不追溯执行；专用 Steam/CEF 形态主辅进程回归；最终便携 EXE 冒烟退出码 0。
-实机只读：已核验当前真实 Steam 的窗口属于 helper，新解析器将其准确关联到同安装目录主程序；未点击或结束真实 Steam，未修改用户配置。
-待验收：真实 Steam 的实体鼠标点叉、Alt+F4、自绘布局及游戏/下载等场景。完整流程测试的强关闭信号通过协调器注入，不能称为真实 Steam 点叉已通过。
-演示：Preview-Notification.cmd 只显示合成数据。测试临时夹具和配置独立，运行依赖采用白名单复制，不复制桌面私人文件。
-隐私：源码包排除 .git、bin/obj、构建缓存、用户配置、日志与调试符号。
-详见 docs/VALIDATION-0.2.2.md、docs/TESTING.md。
-CloseMeansExit.exe SHA-256: 2f49867a555a1329b95b9596db0b0e9ade3f63c69a4c574d23bd29c1b49c0319
+目前仅实现基本功能，真实应用兼容性与使用体验仍在完善中。
+觉得好用，别忘了给项目点个 Star ⭐！
+
+源码基于 0.2.2 本地快照；更早的 0.2.0 基线提交为 3a5ea11a23be2673c7aa0d54486d7718838deaf7。
+0.2.2 基线已运行：207 条核心断言、Windows 原生保护、提醒保存链路及 Steam/CEF 形态夹具回归。
+真实应用的实体鼠标、Alt+F4、自绘布局、游戏/下载等场景仍需分别验收；自动链路中的强关闭信号通过协调器注入。
+
+scripts/publish.ps1 为每个便携包生成独立 BUILD-INFO.txt，记录对应版本、源码提交、源码状态、SDK、EXE SHA-256 与构建时间。
+公开 Beta 构建结果以对应 GitHub Actions 与 Release 记录为准。
+运行数据保存在使用者本机；源码和发布包排除个人配置、活动日志、凭据和构建缓存。
+详见 README.md、docs/RELEASE-0.2.2-beta.1.md、docs/VALIDATION-0.2.2.md 与 docs/TESTING.md。

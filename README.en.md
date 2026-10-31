@@ -2,9 +2,17 @@
 
 A Windows tray utility that makes closing an app an explicit choice to exit.
 
+> **Beta test release · 0.2.2-beta.1**
+>
+> Only the basic functionality is implemented so far. Real-app compatibility and the overall experience are still being improved. Feedback and issue reports are welcome.
+
+**If you find it useful, please give the project a Star ⭐!**
+
 CloseMeansExit observes windows that disappear while their process remains alive. A non-activating card in the lower-right corner shows the executable name, full path, and working-set memory, with Add to blocklist (加入黑名单) and Not now (暂不处理) buttons. A saved rule applies on the next confirmed close action: the utility waits, verifies that no interactive windows remain, and terminates that specific process instance.
 
-**Version 0.2.2 is an early preview.** Core tests, native Windows checks and a private fixture's notification/persistence pipeline have run on Windows x64. Physical mouse/keyboard input and real-app compatibility still require manual acceptance testing.
+The 0.2.2 baseline has passed core tests, native Windows checks and a private fixture's notification/persistence pipeline on Windows x64. Physical mouse/keyboard input and real-app compatibility still require manual acceptance testing. See GitHub Actions and the corresponding Release for the public Beta build results.
+
+Download Beta portable packages from the repository's **Releases** page and read the usage notes below. [Beta release notes](docs/RELEASE-0.2.2-beta.1.md)
 
 ## Changes in 0.2.2
 
@@ -100,18 +108,18 @@ Output is written to `artifacts/`. Core tests run on non-Windows systems; native
 
 ## Publish your own repository
 
-This delivery is a sanitized source package prepared for publication. It has not been pushed to GitHub, and GitHub Actions has not been run for this delivery. See [privacy and package contents](docs/PRIVACY.md). Once a target repository is ready, you can publish manually; replace `OWNER` below with the target repository owner:
+The source, tests and release configuration are available under the MIT license. Do not commit settings, runtime logs or local build data; see [privacy and package contents](docs/PRIVACY.md). To publish your own repository, replace `OWNER` below with the target repository owner:
 
 ```powershell
 git init -b main
 git add .
-git commit -m "Initial CloseMeansExit preview"
+git commit -m "Initial CloseMeansExit beta"
 git remote add origin https://github.com/OWNER/CloseMeansExit.git
 git push -u origin main
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.2-beta.1
+git push origin v0.2.2-beta.1
 ```
 
-The source ZIP excludes `.git`, so initialize a repository for its first publication. Skip initialization or commit steps already completed, and retain any existing remote. The included CI configuration runs tests and Windows builds on pushes and pull requests. A `v*` tag creates x64 / ARM64 release ZIPs and `SHA256SUMS`.
+The source ZIP excludes `.git`, so initialize a repository for its first publication. Skip initialization or commit steps already completed, and retain any existing remote. The included CI configuration runs tests and Windows builds on pushes and pull requests. A `v*` tag creates x64 / ARM64 ZIPs and `SHA256SUMS` in a GitHub Release explicitly marked **Pre-release / Beta**. An ARM64 build does not establish ARM64 device compatibility.
 
 See [manual verification](docs/TESTING.md), the [Chinese README](README.md), and the [MIT license](LICENSE).

@@ -2,9 +2,17 @@
 
 让“关闭窗口”重新成为退出应用的明确选择。
 
+> **Beta 测试版 · 0.2.2-beta.1**
+>
+> 目前仅实现了基本功能，真实应用兼容性和使用体验仍在完善中。欢迎试用、反馈问题和提出建议。
+
+**如果觉得好用，别忘了给项目点个 Star ⭐！**
+
 CloseMeansExit 是一个 Windows 托盘工具：发现窗口消失后仍然存活的应用，会在右下角显示可直接操作的提醒卡片，展示程序名、完整路径和进程工作集；你可以选择“加入黑名单”或“暂不处理”。加入后，下一次确认关闭操作、应用最后一个窗口消失且经过等待，才结束那次关闭对应的进程实例。
 
-**当前版本：0.2.2，早期预览。** 已在 Windows x64 运行核心测试、原生冒烟检查和专用测试应用的提醒保存链路。真实应用的鼠标点叉、`Alt+F4` 与不同窗口布局仍需人工验收，自动测试通过不能替代兼容性确认。
+0.2.2 基线已在 Windows x64 运行核心测试、原生冒烟检查和专用测试应用的提醒保存链路。真实应用的鼠标点叉、`Alt+F4` 与不同窗口布局仍需人工验收，自动测试通过不能替代兼容性确认。公开 Beta 的构建结果以 GitHub Actions 和对应 Release 为准。
+
+可在仓库的 **Releases** 页面下载 Beta 便携包；首次使用前请阅读下面的说明。[本次 Beta 发布说明](docs/RELEASE-0.2.2-beta.1.md)
 
 ## 0.2.2：Steam 与关闭按钮兼容
 
@@ -127,19 +135,19 @@ pwsh ./scripts/publish.ps1 -Runtime win-arm64
 
 ## 发布到自己的 GitHub
 
-本次交付是适合发布的脱敏源码包，未实际推送到 GitHub 或运行 GitHub Actions。源码包不含 Git 历史与本机运行数据，详见[隐私与发布内容说明](docs/PRIVACY.md)。以后准备好目标仓库后，可以手动发布；将下方的 `OWNER` 替换为目标仓库所有者：
+源码、测试和发布配置可按 MIT 许可证使用。配置、运行日志与本机构建数据不应提交，详见[隐私与发布内容说明](docs/PRIVACY.md)。如需发布到自己的仓库，将下方的 `OWNER` 替换为目标仓库所有者：
 
 ```powershell
 git init -b main
 git add .
-git commit -m "Initial CloseMeansExit preview"
+git commit -m "Initial CloseMeansExit beta"
 git remote add origin https://github.com/OWNER/CloseMeansExit.git
 git push -u origin main
-git tag v0.2.2
-git push origin v0.2.2
+git tag v0.2.2-beta.1
+git push origin v0.2.2-beta.1
 ```
 
-源码 ZIP 不含 `.git`，因此首次发布需要初始化仓库。若已经提交或配置远程，跳过对应步骤并保留现有远程。随附的工作流配置在推送和 PR 时测试、构建，在 `v*` 标签时生成 Windows x64 / ARM64 ZIP 与 `SHA256SUMS`，并创建 GitHub Release。
+源码 ZIP 不含 `.git`，因此首次发布需要初始化仓库。若已经提交或配置远程，跳过对应步骤并保留现有远程。随附的工作流配置在推送和 PR 时测试、构建，在 `v*` 标签时生成 Windows x64 / ARM64 ZIP 与 `SHA256SUMS`，并创建明确标记为 **Pre-release / Beta** 的 GitHub Release。ARM64 构建不代表已通过 ARM64 实机测试。
 
 ## 开发与验证
 
