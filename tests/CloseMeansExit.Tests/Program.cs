@@ -141,6 +141,125 @@ CloseSession altF4 = NewSession(rule, CloseEvidence.AltF4);
 Advance(altF4, hidden, 0, rule);
 Equal(DecisionKind.Terminate, Advance(altF4, hidden, 3, rule).Kind, "Alt-F4 is explicit close evidence");
 
+CloseWindowSource sourceWindow = new((nint)456, process);
+ProcessSnapshot originalVisible = visible with { OnlySourceWindowVisible = true };
+CloseSession NewSourceSession(AppRule? captured = null,
+    CloseEvidence evidence = CloseEvidence.StandardCloseButton) =>
+    new(new CloseObservation(process, "Example", evidence, origin) { SourceWindow = sourceWindow }, captured);
+
+// A slow close may leave its original window visible past the grace period.
+// Keep the click only while the native probe confirms that exact window alone.
+foreach (CloseEvidence evidence in new[]
+{
+    CloseEvidence.StandardCloseButton, CloseEvidence.AltF4, CloseEvidence.CustomTitleBarZone
+})
+{
+    AppRule delayedRule = evidence == CloseEvidence.CustomTitleBarZone ? customRule : rule;
+    CloseSession delayed = NewSourceSession(delayedRule, evidence);
+    Equal(DecisionKind.Wait, Advance(delayed, originalVisible, 0, delayedRule).Kind,
+        evidence + " original window initially remains open");
+    Equal(DecisionKind.Wait, Advance(delayed, originalVisible, 3, delayedRule).Kind,
+        evidence + " original window can process close beyond grace");
+    Equal(DecisionKind.Wait, Advance(delayed, originalVisible, 4, delayedRule).Kind,
+        evidence + " slow close retains original intent");
+    Equal(DecisionKind.Wait, Advance(delayed, hidden, 5, delayedRule).Kind,
+        evidence + " delayed hide starts a new stability period");
+    Equal(DecisionKind.Wait, Advance(delayed, hidden, 5.99, delayedRule).Kind,
+        evidence + " delayed hide still requires one stable second");
+    Equal(DecisionKind.Terminate, Advance(delayed, hidden, 6, delayedRule).Kind,
+        evidence + " stable delayed hide can end the captured process");
+    Equal(DecisionKind.Ignore, Advance(delayed, hidden, 7, delayedRule).Kind,
+        evidence + " delayed termination is emitted only once");
+}
+
+CloseSession missingSource = NewSession(rule);
+Advance(missingSource, originalVisible, 0, rule);
+Equal(DecisionKind.Ignore, Advance(missingSource, originalVisible, 3, rule).Kind,
+    "a source-only flag without captured window identity cannot extend waiting");
+
+CloseSession weakSource = NewSourceSession(rule, CloseEvidence.WindowDisappeared);
+Advance(weakSource, originalVisible, 0, rule);
+Equal(DecisionKind.Ignore, Advance(weakSource, originalVisible, 3, rule).Kind,
+    "weak disappearance evidence cannot retain an original-window close intent");
+Equal(DecisionKind.Ignore, Advance(weakSource, hidden, 6, rule).Kind,
+    "weak canceled source attempt cannot become executable after hiding");
+
+CloseSession anotherWindow = NewSourceSession(rule);
+Advance(anotherWindow, originalVisible, 3, rule);
+Equal(DecisionKind.Ignore, Advance(anotherWindow, visible, 4, rule).Kind,
+    "another, minimized, disabled or unverified visible window ends extended waiting");
+Equal(DecisionKind.Ignore, Advance(anotherWindow, hidden, 6, rule).Kind,
+    "removing a protected window cannot revive the old click");
+
+CloseSession sourceReturns = NewSourceSession(rule);
+Advance(sourceReturns, originalVisible, 3, rule);
+Advance(sourceReturns, hidden, 4, rule);
+Equal(DecisionKind.Ignore, Advance(sourceReturns, originalVisible, 4.5, rule).Kind,
+    "even the original window returning after hiding permanently cancels");
+Equal(DecisionKind.Ignore, Advance(sourceReturns, hidden, 6, rule).Kind,
+    "rehiding a returned source window cannot reactivate the attempt");
+
+CloseSession originalNeverCloses = NewSourceSession(rule);
+Equal(DecisionKind.Wait, Advance(originalNeverCloses, originalVisible, 3, rule).Kind,
+    "source window may remain visible after the grace boundary");
+Equal(DecisionKind.Wait, Advance(originalNeverCloses, originalVisible, 9.99, rule).Kind,
+    "repeated source checks may wait within the original click lifetime");
+Equal(DecisionKind.Ignore, Advance(originalNeverCloses, originalVisible, 10, rule).Kind,
+    "source checks never renew the ten-second click lifetime");
+Equal(DecisionKind.Ignore, Advance(originalNeverCloses, hidden, 11, rule).Kind,
+    "a source disappearing after expiry cannot revive the attempt");
+
+CloseSession sourceHidesTooLate = NewSourceSession(rule);
+Advance(sourceHidesTooLate, originalVisible, 8.9, rule);
+Equal(DecisionKind.Wait, Advance(sourceHidesTooLate, hidden, 9.5, rule).Kind,
+    "late disappearance still requires hidden stability");
+Equal(DecisionKind.Ignore, Advance(sourceHidesTooLate, hidden, 10, rule).Kind,
+    "lifetime expiry takes precedence over completing delayed stability");
+
+CloseSession sourcePaused = NewSourceSession(rule);
+Advance(sourcePaused, originalVisible, 3, rule);
+Equal(DecisionKind.Ignore, Advance(sourcePaused, originalVisible, 4, rule, paused: true).Kind,
+    "pausing during an extended wait cancels the click");
+Equal(DecisionKind.Ignore, Advance(sourcePaused, hidden, 6, rule).Kind,
+    "resuming cannot reactivate an extended wait");
+
+foreach ((AppRule? replacement, string description) in new (AppRule?, string)[]
+{
+    (null, "removing the rule"),
+    (rule with { Enabled = false }, "disabling the rule"),
+    (rule with { IncludeChildren = true }, "changing process-tree scope"),
+    (rule with { UseCustomCloseZone = true }, "changing custom-close permission")
+})
+{
+    CloseSession changedDuringWait = NewSourceSession(rule);
+    Advance(changedDuringWait, originalVisible, 3, rule);
+    Equal(DecisionKind.Ignore, Advance(changedDuringWait, originalVisible, 4, replacement).Kind,
+        description + " cancels an extended source wait");
+    Equal(DecisionKind.Ignore, Advance(changedDuringWait, hidden, 6, rule).Kind,
+        description + " cannot be undone to reuse the old click");
+}
+
+foreach ((ProcessSnapshot snapshot, string description) in new[]
+{
+    (originalVisible with { IsAlive = false }, "natural exit"),
+    (originalVisible with { IdentityMatches = false }, "changed process identity"),
+    (originalVisible with { Reliable = false }, "unreliable window probe")
+})
+{
+    CloseSession invalidDuringWait = NewSourceSession(rule);
+    Advance(invalidDuringWait, originalVisible, 3, rule);
+    Equal(DecisionKind.Ignore, Advance(invalidDuringWait, snapshot, 4, rule).Kind,
+        description + " cancels an extended source wait");
+    Equal(DecisionKind.Ignore, Advance(invalidDuringWait, hidden, 6, rule).Kind,
+        description + " cannot reactivate after a later valid probe");
+}
+
+CloseSession sourceUnlistedAtClick = NewSourceSession();
+Advance(sourceUnlistedAtClick, originalVisible, 3, rule);
+Advance(sourceUnlistedAtClick, hidden, 5, rule);
+Equal(DecisionKind.Candidate, Advance(sourceUnlistedAtClick, hidden, 6, rule).Kind,
+    "adding a rule during a slow close still cannot arm the past click");
+
 Equal(@"C:\Apps\Example\Example.exe", RulePaths.Normalize(@"c:/Apps/Other/../Example/./Example.exe"), "normalize Windows path");
 Equal(true, RulePaths.Equal(@"\\?\C:\Apps\Example.exe", @"c:\apps\EXAMPLE.exe"), "extended drive prefix");
 Equal(true, RulePaths.Equal(@"\\?\UNC\server\share\App.exe", @"\\SERVER\share\app.exe"), "extended UNC prefix");

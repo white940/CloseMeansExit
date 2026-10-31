@@ -173,6 +173,14 @@ internal static class NativeMethods
     internal static extern bool IsWindow(nint hwnd);
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsIconic(nint hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsWindowEnabled(nint hwnd);
+
+    [DllImport("user32.dll")]
     internal static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

@@ -39,6 +39,7 @@ internal static class MonitorSmokeTests
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(fixtureExecutable)!
         }) ?? throw new InvalidOperationException("监测链路测试进程启动失败。");
+        _ = fixture.Handle;
         Process? protectedHelper = null;
 
         var platform = new WindowsPlatform();
@@ -123,13 +124,22 @@ internal static class MonitorSmokeTests
             report("CHECK: existing-rule compatibility repair saved without retroactive termination");
 
             Command(window, TestFixtureForm.RestoreMessage);
-            WaitFor(() => platform.Probe(identity, false) is { HasVisibleWindows: true, Reliable: true },
+            var source = new CloseWindowSource(window, identity);
+            WaitFor(() => platform.Probe(identity, false, source) is { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: true },
                 Pump, diagnostics, "测试窗口未恢复");
-            monitor.OnObservation(new CloseObservation(identity, "Fixture", CloseEvidence.CustomTitleBarZone, DateTimeOffset.UtcNow));
-            report("CHECK: subsequent close intent queued");
-            Command(window, 0x0112, 0xF060);
+            monitor.OnObservation(new CloseObservation(identity, "Fixture", CloseEvidence.CustomTitleBarZone, DateTimeOffset.UtcNow)
+            {
+                SourceWindow = source
+            });
+            var delayedClose = Stopwatch.StartNew();
+            Require(Command(window, TestFixtureForm.DelayedHideMessage) == 1, "未能安排测试原窗口延迟隐藏。");
+            report("CHECK: one source-bound close intent queued; original window stays visible for 4.5 seconds");
+            WaitFor(() => !NativeMethods.IsWindowVisible(window), Pump, diagnostics, "原关闭窗口未按计划延迟隐藏");
+            Require(delayedClose.Elapsed >= TimeSpan.FromMilliseconds(TestFixtureForm.DelayedHideMilliseconds - 300),
+                "测试原窗口必须在三秒宽限期结束后才隐藏。");
             WaitFor(() => fixture.HasExited, Pump, diagnostics, "已有规则的下一次关闭未结束测试实例");
             WaitFor(() => discoveries.Any(r => r.Kind == DiscoveryKind.Terminated), Pump, diagnostics, "结束结果未送达管理界面");
+            report("PASS: source-bound close intent survives delayed hiding beyond the three-second grace period");
             Require(discoveries.Count(r => r.Kind == DiscoveryKind.Candidate) == 2 && Card() is null,
                 "已有规则的关闭不应再次弹出加入提醒。");
         }

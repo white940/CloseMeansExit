@@ -22,7 +22,12 @@ public sealed record CloseObservation(
     ProcessIdentity Process,
     string WindowTitle,
     CloseEvidence Evidence,
-    DateTimeOffset At);
+    DateTimeOffset At)
+{
+    public CloseWindowSource? SourceWindow { get; init; }
+}
+
+public sealed record CloseWindowSource(nint Handle, ProcessIdentity Owner);
 
 public sealed record ProcessSnapshot(
     bool IsAlive,
@@ -32,6 +37,7 @@ public sealed record ProcessSnapshot(
     long WorkingSetBytes)
 {
     public string? Diagnostic { get; init; }
+    public bool OnlySourceWindowVisible { get; init; }
 }
 
 public sealed record WindowEntry(nint Handle, ProcessIdentity Process, string Title, long WorkingSetBytes);

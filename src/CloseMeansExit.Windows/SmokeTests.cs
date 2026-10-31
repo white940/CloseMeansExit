@@ -43,12 +43,20 @@ internal static class SmokeTests
             start.ArgumentList.Add("--fixture");
             Process fixture = Process.Start(start) ?? throw new InvalidOperationException("测试进程启动失败。");
             fixtures.Add(fixture);
+            _ = fixture.Handle;
 
             nint primary = WaitFor(() => FindWindow(platform, fixture.Id), h => h != 0, clock, "等待测试窗口");
             ProcessIdentity identity = platform.TryGetIdentity(fixture.Id) ?? throw new InvalidOperationException("无法读取测试进程身份。");
+            var source = new CloseWindowSource(primary, identity);
             Require(platform.Probe(identity, false) is { IsAlive: true, IdentityMatches: true, HasVisibleWindows: true, Reliable: true }, "可见窗口探测失败。");
+            Require(platform.Probe(identity, false, source) is { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: true },
+                "唯一的原关闭窗口应允许继续等待隐藏。");
+            Require(!platform.Probe(identity, false).OnlySourceWindowVisible &&
+                !platform.Probe(identity, false, source with { Owner = identity with { StartTimeUtcTicks = identity.StartTimeUtcTicks + 1 } }).OnlySourceWindowVisible &&
+                !platform.Probe(identity, false, source with { Owner = identity with { ExecutablePath = identity.ExecutablePath + ".wrong.exe" } }).OnlySourceWindowVisible,
+                "缺少或伪造的原窗口身份不能延长等待。");
             Require(!platform.TryTerminate(identity, false, out _), "可见窗口保护失效。");
-            Record("PASS: visible window prevents termination");
+            Record("PASS: sole source window permits observation only; visible window still prevents termination");
 
             Require(!platform.TryTerminate(identity with { StartTimeUtcTicks = identity.StartTimeUtcTicks + 1 }, false, out _), "创建时间不匹配保护失效。");
             Require(!platform.TryTerminate(identity with { ExecutablePath = identity.ExecutablePath + ".wrong.exe" }, false, out _), "路径不匹配保护失效。");
@@ -59,13 +67,17 @@ internal static class SmokeTests
             Record("PASS: PID/start-time/path and self protections");
 
             Command(primary, TestFixtureForm.MinimizeMessage);
-            WaitFor(() => platform.Probe(identity, false), s => s.HasVisibleWindows && s.Reliable, clock, "检查最小化窗口");
+            WaitFor(() => NativeMethods.IsIconic(primary), minimized => minimized, clock, "检查最小化窗口");
+            Require(platform.Probe(identity, false, source) is { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: false },
+                "最小化的原窗口不能延长等待。");
             Require(!platform.TryTerminate(identity, false, out _), "最小化窗口保护失效。");
             Command(primary, TestFixtureForm.RestoreMessage);
             Record("PASS: minimized window remains protected");
 
             Command(primary, TestFixtureForm.CreateSecondaryMessage);
             WaitFor(() => platform.ListWindows().Where(w => w.Process.Pid == fixture.Id).ToArray(), a => a.Length >= 2, clock, "等待第二窗口");
+            Require(platform.Probe(identity, false, source) is { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: false },
+                "第二窗口存在时不得将原窗口视为唯一可见窗口。");
             CloseWindow(primary);
             Require(!fixture.HasExited && NativeMethods.IsWindow(primary), "关闭操作应仅隐藏测试主窗口，不能销毁窗口或退出进程。");
             Require(platform.Probe(identity, false).HasVisibleWindows, "第二窗口未被保护。");
@@ -99,11 +111,19 @@ internal static class SmokeTests
             Require(protectedHelper.WaitForExit(5000), "测试系统子进程未按要求清理。");
             Record("PASS: system-directory helper permits read-only discovery but prevents tree termination");
 
-            Require(NativeMethods.PostMessage(primary, TestFixtureForm.SaveDialogMessage, 0, 0), "无法显示测试保存提示。");
+            Command(primary, TestFixtureForm.RestoreMessage);
+            Require(NativeMethods.PostMessage(primary, TestFixtureForm.SaveDialogWithOwnerMessage, 0, 0), "无法显示测试保存提示。");
             nint dialog = WaitFor(() => platform.ListWindows().FirstOrDefault(w => w.Process.Pid == fixture.Id && w.Title == TestFixtureForm.SaveTitle)?.Handle ?? 0,
                 h => h != 0, clock, "等待保存提示");
+            Require(NativeMethods.IsWindowVisible(primary) && !NativeMethods.IsWindowEnabled(primary),
+                "保存提示必须保持原窗口可见并禁用其输入。");
+            Require(platform.Probe(identity, false, source) is { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: false },
+                "保存提示和禁用的原窗口不能延长等待。");
             Require(!platform.TryTerminate(identity, false, out _), "保存对话框保护失效。");
             CloseWindow(dialog);
+            WaitFor(() => NativeMethods.IsWindowEnabled(primary), enabled => enabled, clock, "等待保存提示解除输入禁用");
+            Require(platform.Probe(identity, false, source).OnlySourceWindowVisible, "保存提示关闭后应重新识别唯一原窗口。");
+            CloseWindow(primary);
             WaitFor(() => platform.Probe(identity, false), s => !s.HasVisibleWindows && s.Reliable, clock, "等待保存提示关闭");
             Record("PASS: visible save dialog prevents termination");
 
@@ -117,6 +137,11 @@ internal static class SmokeTests
             Require(RulePaths.Equal(childIdentity.ExecutablePath, identity.ExecutablePath) && childIdentity.StartTimeUtcTicks >= identity.StartTimeUtcTicks,
                 "测试子进程身份不符合预期。");
             Require(child.StartTime.ToUniversalTime().Ticks == childIdentity.StartTimeUtcTicks, "测试子进程句柄身份不符合预期。");
+            Require(platform.Probe(identity, false, new CloseWindowSource(childWindow, childIdentity)) is
+                { HasVisibleWindows: true, Reliable: true, OnlySourceWindowVisible: true },
+                "子进程实际持有的唯一原窗口应允许继续观察。");
+            Require(!platform.Probe(identity, false, new CloseWindowSource(childWindow, identity)).OnlySourceWindowVisible,
+                "主进程身份不能冒充原窗口的实际子进程持有者。");
             Require(platform.Probe(identity, false) is { HasVisibleWindows: true, Reliable: true }, "仅结束根进程模式也必须保护子进程窗口。");
             Require(platform.Probe(identity, true) is { HasVisibleWindows: true, Reliable: true }, "进程树探测未保护子进程窗口。");
             Require(!platform.TryTerminate(identity, false, out _), "仅结束根进程模式未保护子进程的可见窗口。");

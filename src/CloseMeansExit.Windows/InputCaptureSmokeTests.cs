@@ -26,7 +26,8 @@ internal static class InputCaptureSmokeTests
         capture.SetResult(new CloseInputMonitor.CapturedIntent(target, owner, "Fixture"));
         completion.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
         CloseObservation result = received.Task.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
-        if (result.Process != target || result.At != releasedAt || result.Evidence != CloseEvidence.StandardCloseButton)
+        if (result.Process != target || result.At != releasedAt || result.Evidence != CloseEvidence.StandardCloseButton ||
+            result.SourceWindow is not { } source || source.Handle != press.Hwnd || source.Owner != owner)
             throw new InvalidOperationException("延迟完成的点击必须保留目标身份及实际输入时间，不能采用核验完成时间。");
     }
 }

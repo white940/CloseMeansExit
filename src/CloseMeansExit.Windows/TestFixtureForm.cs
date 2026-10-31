@@ -15,6 +15,9 @@ internal sealed class TestFixtureForm : Form
     internal const uint SpawnSteamWindowMessage = 0x8000 + 0x58;
     internal const uint SpawnUnrelatedSteamWindowMessage = 0x8000 + 0x59;
     internal const uint CleanupHelpersMessage = 0x8000 + 0x5A;
+    internal const uint DelayedHideMessage = 0x8000 + 0x5B;
+    internal const uint SaveDialogWithOwnerMessage = 0x8000 + 0x5C;
+    internal const int DelayedHideMilliseconds = 4500;
     internal const string TitlePrefix = "CloseMeansExit Test Fixture ";
     internal const string SaveTitle = "CloseMeansExit Fixture Save Confirmation";
     private bool _allowExit;
@@ -22,6 +25,7 @@ internal sealed class TestFixtureForm : Form
     private readonly List<Process> _helperProcesses = [];
     private readonly List<Process> _protectedHelpers = [];
     private readonly NotifyIcon _tray;
+    private System.Windows.Forms.Timer? _delayedHideTimer;
 
     internal TestFixtureForm(bool secondary)
     {
@@ -72,6 +76,7 @@ internal sealed class TestFixtureForm : Form
     {
         if (disposing)
         {
+            _delayedHideTimer?.Dispose();
             CleanupProtectedHelpers();
             _tray.Visible = false;
             _tray.ContextMenuStrip?.Dispose();
@@ -122,6 +127,14 @@ internal sealed class TestFixtureForm : Form
             case CleanupHelpersMessage:
                 message.Result = CleanupHelpers() ? 1 : 0;
                 return;
+            case DelayedHideMessage:
+                ScheduleDelayedHide();
+                message.Result = 1;
+                return;
+            case SaveDialogWithOwnerMessage:
+                ShowSaveDialog();
+                message.Result = 1;
+                return;
         }
 
         base.WndProc(ref message);
@@ -146,6 +159,19 @@ internal sealed class TestFixtureForm : Form
     private void ShowSaveDialog() => MessageBox.Show(this,
         "此对话框用于检查：存在保存提示时不能结束进程。", SaveTitle,
         MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
+
+    private void ScheduleDelayedHide()
+    {
+        _delayedHideTimer?.Dispose();
+        var timer = new System.Windows.Forms.Timer { Interval = DelayedHideMilliseconds };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            Hide();
+        };
+        _delayedHideTimer = timer;
+        timer.Start();
+    }
 
     private void RestoreFixture()
     {

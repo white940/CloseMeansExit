@@ -166,7 +166,7 @@ internal sealed class MonitorCoordinator : IDisposable
         {
             var session = pair.Value.Session;
             bool children = session.CapturedRule?.IncludeChildren == true;
-            var snapshot = _platform.Probe(pair.Key, children);
+            var snapshot = _platform.Probe(pair.Key, children, session.Observation.SourceWindow);
             AppRule? rule;
             lock (_ruleLock)
             {

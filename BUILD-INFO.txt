@@ -1,13 +1,13 @@
-CloseMeansExit 0.2.2-beta.2 — Beta 测试版（源码说明）
-日期：2026-10-31
+CloseMeansExit 0.2.3-beta.1 — Beta 测试版（源码说明）
+日期：2026-11-01
 目前仅实现基本功能，真实应用兼容性与使用体验仍在完善中。
 觉得好用，别忘了给项目点个 Star ⭐！
 
 源码基于 0.2.2 本地快照；更早的 0.2.0 基线提交为 3a5ea11a23be2673c7aa0d54486d7718838deaf7。
-0.2.2 基线已运行：207 条核心断言、Windows 原生保护、提醒保存链路及 Steam/CEF 形态夹具回归。
+0.2.3 本机已运行：258 条核心断言、Windows 原生保护、4.5 秒延迟隐藏的提醒保存链路及 Steam/CEF 形态夹具回归。
 真实应用的实体鼠标、Alt+F4、自绘布局、游戏/下载等场景仍需分别验收；自动链路中的强关闭信号通过协调器注入。
 
 scripts/publish.ps1 为每个便携包生成独立 BUILD-INFO.txt，记录对应版本、源码提交、源码状态、SDK、EXE SHA-256 与构建时间。
 公开 Beta 构建结果以对应 GitHub Actions 与 Release 记录为准。
 运行数据保存在使用者本机；源码和发布包排除个人配置、活动日志、凭据和构建缓存。
-详见 README.md、docs/RELEASE-0.2.2-beta.2.md、docs/VALIDATION-0.2.2.md 与 docs/TESTING.md。
+详见 README.md、docs/RELEASE-0.2.3-beta.1.md、docs/VALIDATION-0.2.2.md 与 docs/TESTING.md。

@@ -86,7 +86,9 @@ public sealed class CloseSession
                 return Finish(DecisionKind.Ignore, "应用窗口或保存提示重新出现。");
             }
 
-            if (now - Observation.At >= ExitGrace)
+            if (now - Observation.At >= ExitGrace &&
+                (Observation.Evidence == CloseEvidence.WindowDisappeared ||
+                 Observation.SourceWindow is null || !snapshot.OnlySourceWindowVisible))
             {
                 return Finish(DecisionKind.Ignore, "应用仍有窗口或保存提示，不执行结束。");
             }

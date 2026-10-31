@@ -249,7 +249,10 @@ public sealed class CloseInputMonitor : IDisposable
             }
             // Preserve the actual input time: a later rule change cannot arm
             // a click merely because its asynchronous capture completed later.
-            Publish(new CloseObservation(captured.Process, captured.Title, press.Evidence, releasedAt));
+            Publish(new CloseObservation(captured.Process, captured.Title, press.Evidence, releasedAt)
+            {
+                SourceWindow = new CloseWindowSource(press.Hwnd, captured.WindowOwner)
+            });
         }
         catch (TimeoutException) { Report("本次关闭意图的身份核验超时，已放弃该信号。"); }
         catch (Exception error) { Report($"本次关闭意图未能完成：{error.Message}"); }
@@ -282,7 +285,10 @@ public sealed class CloseInputMonitor : IDisposable
                                         CapturedIntent? captured = Capture(hwnd, unchecked((int)pid), CloseEvidence.AltF4, at);
                                         if (captured is not null)
                                         {
-                                            Publish(new CloseObservation(captured.Process, captured.Title, CloseEvidence.AltF4, at));
+                                            Publish(new CloseObservation(captured.Process, captured.Title, CloseEvidence.AltF4, at)
+                                            {
+                                                SourceWindow = new CloseWindowSource(hwnd, captured.WindowOwner)
+                                            });
                                         }
                                     }
                                     catch (Exception error)

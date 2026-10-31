@@ -77,7 +77,7 @@ public sealed class WindowsPlatform
         return result;
     }
 
-    public ProcessSnapshot Probe(ProcessIdentity identity, bool includeChildren)
+    public ProcessSnapshot Probe(ProcessIdentity identity, bool includeChildren, CloseWindowSource? sourceWindow = null)
     {
         using var rootHandle = NativeMethods.OpenProcess(NativeMethods.QueryLimitedInformation | NativeMethods.Synchronize, false, identity.Pid);
         if (rootHandle.IsInvalid)
@@ -120,8 +120,11 @@ public sealed class WindowsPlatform
                 return new ProcessSnapshot(true, true, true, false, memory) { Diagnostic = diagnostic };
             }
 
-            bool reliable = TryFindVisibleWindows(members.Select(m => m.Identity.Pid).ToHashSet(), out bool visible);
-            return new ProcessSnapshot(true, true, visible, reliable, memory);
+            bool reliable = TryInspectVisibleWindows(members, sourceWindow, out bool visible, out bool onlySourceWindow);
+            return new ProcessSnapshot(true, true, visible, reliable, memory)
+            {
+                OnlySourceWindowVisible = onlySourceWindow
+            };
         }
         finally
         {
@@ -419,6 +422,55 @@ public sealed class WindowsPlatform
         bool reliable = NativeMethods.EnumWindows(callback, 0);
         GC.KeepAlive(callback);
         visible = found;
+        return reliable;
+    }
+
+    private static bool TryInspectVisibleWindows(IReadOnlyList<HeldProcess> members, CloseWindowSource? sourceWindow,
+        out bool visible, out bool onlySourceWindow)
+    {
+        var pids = members.Select(m => m.Identity.Pid).ToHashSet();
+        int visibleCount = 0;
+        nint soleWindow = 0;
+        bool uncertainWindow = false;
+        NativeMethods.EnumWindowsProc callback = (hwnd, _) =>
+        {
+            if (!NativeMethods.IsWindowVisible(hwnd)) return true;
+            uint threadId = NativeMethods.GetWindowThreadProcessId(hwnd, out uint pid);
+            if (threadId == 0 || pid == 0)
+            {
+                uncertainWindow = true;
+                return true;
+            }
+            if (pids.Contains(unchecked((int)pid)))
+            {
+                // Every visible tree window protects the app, including modal,
+                // disabled, tool and minimized windows. None are filtered out.
+                visibleCount++;
+                soleWindow = hwnd;
+            }
+            return true;
+        };
+        bool reliable = NativeMethods.EnumWindows(callback, 0);
+        GC.KeepAlive(callback);
+        visible = visibleCount != 0;
+        onlySourceWindow = false;
+        reliable &= !uncertainWindow;
+        if (!reliable || uncertainWindow || visibleCount != 1 || sourceWindow is not { Handle: not 0 } ||
+            soleWindow != sourceWindow.Handle) return reliable;
+
+        HeldProcess? owner = members.FirstOrDefault(m => SameIdentity(m.Identity, sourceWindow.Owner));
+        if (owner is null || !IsAlive(owner.Handle) ||
+            ReadIdentity(owner.Handle, owner.Identity.Pid) is not { } actualOwner ||
+            !SameIdentity(actualOwner, sourceWindow.Owner)) return reliable;
+
+        // This grants extra observation time only. Termination still rejects
+        // every visible window through the independent check above.
+        nint source = sourceWindow.Handle;
+        onlySourceWindow = NativeMethods.IsWindow(source) && NativeMethods.IsWindowVisible(source) &&
+            NativeMethods.GetAncestor(source, NativeMethods.GaRoot) == source &&
+            NativeMethods.GetWindowThreadProcessId(source, out uint sourcePid) != 0 &&
+            sourcePid == (uint)sourceWindow.Owner.Pid &&
+            !NativeMethods.IsIconic(source) && NativeMethods.IsWindowEnabled(source);
         return reliable;
     }
 

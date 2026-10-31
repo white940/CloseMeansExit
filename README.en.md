@@ -2,7 +2,7 @@
 
 A Windows tray utility that makes closing an app an explicit choice to exit.
 
-> **Beta test release · 0.2.2-beta.2**
+> **Beta test release · 0.2.3-beta.1**
 >
 > Only the basic functionality is implemented so far. Real-app compatibility and the overall experience are still being improved. Feedback and issue reports are welcome.
 
@@ -12,7 +12,9 @@ CloseMeansExit observes windows that disappear while their process remains alive
 
 The 0.2.2 baseline has passed core tests, native Windows checks and a private fixture's notification/persistence pipeline on Windows x64. Physical mouse/keyboard input and real-app compatibility still require manual acceptance testing. See GitHub Actions and the corresponding Release for the public Beta build results.
 
-Download Beta portable packages from the repository's **Releases** page and read the usage notes below. [Beta release notes](docs/RELEASE-0.2.2-beta.2.md)
+Download published Beta portable packages from the repository's **Releases** page and read the usage notes below. [Current fix notes](docs/RELEASE-0.2.3-beta.1.md)
+
+0.2.3 retains a close intent while its verified original window alone is still processing the request. The ten-second lifetime stays fixed. Minimized or disabled windows, additional windows, save prompts and windows returning after hiding remain protected.
 
 ## Changes in 0.2.2
 
@@ -116,8 +118,8 @@ git add .
 git commit -m "Initial CloseMeansExit beta"
 git remote add origin https://github.com/OWNER/CloseMeansExit.git
 git push -u origin main
-git tag v0.2.2-beta.2
-git push origin v0.2.2-beta.2
+git tag v0.2.3-beta.1
+git push origin v0.2.3-beta.1
 ```
 
 The source ZIP excludes `.git`, so initialize a repository for its first publication. Skip initialization or commit steps already completed, and retain any existing remote. The included CI configuration runs tests and Windows builds on pushes and pull requests. A `v*` tag creates x64 / ARM64 ZIPs and `SHA256SUMS` in a GitHub Release explicitly marked **Pre-release / Beta**. An ARM64 build does not establish ARM64 device compatibility.
