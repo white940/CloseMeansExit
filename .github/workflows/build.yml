@@ -1,0 +1,111 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  core-tests:
+    name: Core policy tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run dependency-free policy tests
+        run: dotnet run --project tests/CloseMeansExit.Tests -c Release
+
+  windows-build:
+    name: Windows ${{ matrix.runtime }}
+    needs: core-tests
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build Windows adapter
+        run: dotnet build src/CloseMeansExit.Windows -c Release
+      - name: Run Windows smoke checks
+        if: matrix.runtime == 'win-x64'
+        run: dotnet run --project src/CloseMeansExit.Windows -c Release --no-build -- --smoke-test
+      - name: Collect Windows smoke log
+        if: always() && matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          $smokeLog = Join-Path $env:TEMP 'CloseMeansExit-smoke.log'
+          if (Test-Path -LiteralPath $smokeLog -PathType Leaf) {
+            New-Item -ItemType Directory -Path artifacts/logs -Force | Out-Null
+            Copy-Item -LiteralPath $smokeLog -Destination artifacts/logs/CloseMeansExit-smoke.log
+          } else {
+            Write-Host 'No smoke log was produced; the build may have failed before smoke checks ran.'
+          }
+      - name: Upload Windows smoke log
+        if: always() && matrix.runtime == 'win-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-log
+          path: artifacts/logs/CloseMeansExit-smoke.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Package portable executable
+        shell: pwsh
+        run: ./scripts/publish.ps1 -Runtime '${{ matrix.runtime }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloseMeansExit-${{ matrix.runtime }}
+          path: |
+            artifacts/CloseMeansExit-${{ matrix.runtime }}.zip
+            artifacts/CloseMeansExit-${{ matrix.runtime }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: CloseMeansExit-*
+          path: release-assets
+          merge-multiple: true
+      - name: Collect checksums and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum CloseMeansExit-*.zip > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          if ! gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag \
+              --title "CloseMeansExit $RELEASE_TAG" \
+              --notes "Windows portable preview. Extract the ZIP before running. Read the README before enabling force-termination rules."
+          fi
+          gh release upload "$RELEASE_TAG" CloseMeansExit-*.zip SHA256SUMS --clobber
