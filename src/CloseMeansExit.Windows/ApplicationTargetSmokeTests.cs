@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 using CloseMeansExit.Core;
 using CloseMeansExit.Windows.Native;
 
@@ -13,9 +15,14 @@ internal static class ApplicationTargetSmokeTests
 {
     internal static void Run(string fixtureExecutable, Action<string> report)
     {
-        string fixtureDirectory = Path.Combine(Path.GetTempPath(), "CloseMeansExit-steam-" + Guid.NewGuid().ToString("N"));
+        // Hosted runners can expose TEMP through an 8.3 alias. Launch all
+        // copies using its long form so native image paths agree with it.
+        string fixtureDirectory = Path.Combine(ExpandFixturePath(Path.GetTempPath()), "CloseMeansExit-steam-" + Guid.NewGuid().ToString("N"));
         string sourceDirectory = Path.GetDirectoryName(fixtureExecutable)!;
         var fixtures = new List<Process>();
+        Process? root = null;
+        nint mainWindow = 0;
+        bool passed = false;
         try
         {
             string mainExecutable = PrepareCopy(sourceDirectory, fixtureExecutable, fixtureDirectory, "Steam.exe");
@@ -25,18 +32,18 @@ internal static class ApplicationTargetSmokeTests
             string unrelatedExecutable = PrepareCopy(sourceDirectory, fixtureExecutable, unrelatedDirectory, "steamwebhelper.exe");
 
             var platform = new WindowsPlatform();
-            Process root = Process.Start(new ProcessStartInfo(mainExecutable, "--fixture")
+            root = Process.Start(new ProcessStartInfo(mainExecutable, "--fixture")
             {
                 UseShellExecute = false,
                 WorkingDirectory = fixtureDirectory
             }) ?? throw new InvalidOperationException("Steam 形态主夹具启动失败。");
             fixtures.Add(root);
             _ = root.Handle;
-            nint mainWindow = WaitFor(() => WindowForOwner(platform, root.Id), h => h != 0, "等待 Steam 形态主窗口");
+            mainWindow = WaitFor(() => WindowForOwner(platform, root.Id), h => h != 0, "等待 Steam 形态主窗口");
             ProcessIdentity rootIdentity = platform.TryGetIdentity(root.Id)
                 ?? throw new InvalidOperationException("无法确认 Steam 形态主夹具身份。");
 
-            Process helper = CaptureChild(Command(mainWindow, TestFixtureForm.SpawnSteamWindowMessage), fixtures, helperExecutable);
+            Process helper = CaptureChild(Command(mainWindow, TestFixtureForm.SpawnSteamWindowMessage), fixtures, helperExecutable, root, rootIdentity);
             nint helperWindow = WaitFor(() => WindowForOwner(platform, helper.Id), h => h != 0, "等待 Steam 形态辅助窗口");
             ProcessIdentity helperIdentity = platform.TryGetIdentity(helper.Id)
                 ?? throw new InvalidOperationException("无法确认 Steam 形态辅助夹具身份。");
@@ -55,7 +62,7 @@ internal static class ApplicationTargetSmokeTests
             Require(platform.ResolveApplicationProcess(forged) == forged,
                 "辅助进程创建时间不匹配时不得沿父链扩大结束目标。");
 
-            Process unrelated = CaptureChild(Command(mainWindow, TestFixtureForm.SpawnUnrelatedSteamWindowMessage), fixtures, unrelatedExecutable);
+            Process unrelated = CaptureChild(Command(mainWindow, TestFixtureForm.SpawnUnrelatedSteamWindowMessage), fixtures, unrelatedExecutable, root, rootIdentity);
             nint unrelatedWindow = WaitFor(() => WindowForOwner(platform, unrelated.Id), h => h != 0, "等待不同安装路径的辅助窗口");
             ProcessIdentity unrelatedIdentity = platform.TryGetIdentity(unrelated.Id)
                 ?? throw new InvalidOperationException("无法确认不同安装路径的辅助夹具身份。");
@@ -86,9 +93,31 @@ internal static class ApplicationTargetSmokeTests
             Require(root.WaitForExit(3000), "Steam 形态主程序未退出。");
             Require(!helper.HasExited, "仅结束主程序的规则不得改为只结束或同时结束辅助进程。");
             report("PASS: other CEF windows protect the main process; root-only execution ends the main fixture instance");
+            passed = true;
         }
         finally
         {
+            // A capture assertion can fail before its child is adopted below.
+            // The parent retains Process.Start's original child handles and can
+            // clean those up without trusting a failed PID/path assertion.
+            if (root is not null && mainWindow != 0)
+            {
+                try
+                {
+                    if (!root.HasExited)
+                    {
+                        NativeMethods.GetWindowThreadProcessId(mainWindow, out uint owner);
+                        Require(owner == (uint)root.Id && Command(mainWindow, TestFixtureForm.CleanupHelpersMessage) == 1,
+                            "Steam 形态父夹具未能确认子夹具清理完成。");
+                    }
+                }
+                catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+                {
+                    passed = false;
+                    report("Cleanup Steam-shaped child fixtures: " + error.Message);
+                }
+            }
+
             // Objects are captured exclusively from Process.Start or the private
             // fixture's child-PID reply; no name-based cleanup is permitted.
             foreach (Process fixture in fixtures)
@@ -98,25 +127,36 @@ internal static class ApplicationTargetSmokeTests
                     if (!fixture.HasExited)
                     {
                         fixture.Kill();
-                        fixture.WaitForExit(3000);
+                        if (!fixture.WaitForExit(3000))
+                        {
+                            passed = false;
+                            report("Cleanup Steam-shaped fixture did not exit: " + fixture.Id);
+                        }
                     }
                 }
                 catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
                 {
+                    passed = false;
                     report("Cleanup Steam-shaped fixture: " + error.Message);
                 }
                 finally { fixture.Dispose(); }
             }
 
             string fullDirectory = Path.GetFullPath(fixtureDirectory);
-            string prefix = Path.Combine(Path.GetFullPath(Path.GetTempPath()), "CloseMeansExit-steam-");
-            if (fullDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullDirectory))
+            string prefix = Path.Combine(ExpandFixturePath(Path.GetTempPath()), "CloseMeansExit-steam-");
+            // Keep failed fixtures intact for diagnosis. In particular, never
+            // delete runtime DLLs under a child whose capture failed.
+            if (passed && fullDirectory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullDirectory))
             {
                 try { Directory.Delete(fullDirectory, true); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException)
                 {
                     report("Cleanup Steam-shaped directory: " + error.Message);
                 }
+            }
+            else if (Directory.Exists(fullDirectory))
+            {
+                report("Retained failed Steam-shaped fixture directory: " + fullDirectory);
             }
         }
     }
@@ -127,15 +167,27 @@ internal static class ApplicationTargetSmokeTests
         return Path.Combine(destination, name);
     }
 
-    private static Process CaptureChild(nuint pid, List<Process> fixtures, string expectedPath)
+    private static Process CaptureChild(nuint pid, List<Process> fixtures, string expectedPath,
+        Process parent, ProcessIdentity parentIdentity)
     {
         Require(pid > 0 && pid <= int.MaxValue, "Steam 形态辅助夹具 PID 无效。");
         Process child = Process.GetProcessById((int)pid);
         try
         {
-            _ = child.Handle;
-            Require(child.MainModule is { } module && RulePaths.Equal(module.FileName, expectedPath),
-                "测试子进程未指向专用临时夹具；不能采纳该 PID。");
+            // Query the held process handle, not its module list: the loader
+            // need not have populated MainModule when the spawn reply arrives.
+            ProcessIdentity? identity = WindowsPlatform.ReadIdentity(child.SafeHandle, child.Id);
+            string actualPath = identity?.ExecutablePath ?? "<unavailable>";
+            Require(identity is not null &&
+                RulePaths.Equal(ExpandFixturePath(identity.ExecutablePath), ExpandFixturePath(expectedPath)),
+                $"测试子进程未指向专用临时夹具；不能采纳该 PID。 expected='{expectedPath}', actual='{actualPath}'");
+            Require(identity!.StartTimeUtcTicks >= parentIdentity.StartTimeUtcTicks &&
+                NativeMethods.WaitForSingleObject(child.SafeHandle, 0) == NativeMethods.WaitTimeout &&
+                WindowsPlatform.ReadIdentity(parent.SafeHandle, parent.Id) is { } actualParent &&
+                SameIdentity(actualParent, parentIdentity) &&
+                WindowsPlatform.TryReadProcessParents(out var parents) &&
+                parents.TryGetValue(child.Id, out int parentPid) && parentPid == parentIdentity.Pid,
+                $"测试子进程身份或父关系无法确认；不能采纳该 PID。 expected='{expectedPath}', actual='{actualPath}'");
             fixtures.Add(child);
             return child;
         }
@@ -145,6 +197,20 @@ internal static class ApplicationTargetSmokeTests
             throw;
         }
     }
+
+    // Test-only expansion of existing fixture paths; production rule matching
+    // deliberately keeps its existing lexical path policy.
+    internal static string ExpandFixturePath(string path)
+    {
+        var expanded = new StringBuilder(32768);
+        uint length = GetLongPathName(Path.GetFullPath(path), expanded, (uint)expanded.Capacity);
+        if (length == 0 || length >= expanded.Capacity)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "无法展开测试夹具临时路径。");
+        return Path.GetFullPath(expanded.ToString());
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetLongPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetLongPathName(string path, StringBuilder expanded, uint capacity);
 
     private static WindowEntry[] WindowsForOwner(WindowsPlatform platform, int pid) =>
         platform.ListWindows().Where(w =>

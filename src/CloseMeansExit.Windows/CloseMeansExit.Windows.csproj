@@ -7,7 +7,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>CloseMeansExit</AssemblyName>
-    <Version>0.2.2-beta.1</Version>
+    <Version>0.2.2-beta.2</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CloseMeansExit.Core/CloseMeansExit.Core.csproj" />

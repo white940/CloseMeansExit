@@ -14,6 +14,7 @@ internal sealed class TestFixtureForm : Form
     internal const uint CleanupProtectedHelperMessage = 0x8000 + 0x57;
     internal const uint SpawnSteamWindowMessage = 0x8000 + 0x58;
     internal const uint SpawnUnrelatedSteamWindowMessage = 0x8000 + 0x59;
+    internal const uint CleanupHelpersMessage = 0x8000 + 0x5A;
     internal const string TitlePrefix = "CloseMeansExit Test Fixture ";
     internal const string SaveTitle = "CloseMeansExit Fixture Save Confirmation";
     private bool _allowExit;
@@ -118,6 +119,9 @@ internal sealed class TestFixtureForm : Form
             case SpawnUnrelatedSteamWindowMessage:
                 message.Result = SpawnSteamWindow(true);
                 return;
+            case CleanupHelpersMessage:
+                message.Result = CleanupHelpers() ? 1 : 0;
+                return;
         }
 
         base.WndProc(ref message);
@@ -186,8 +190,8 @@ internal sealed class TestFixtureForm : Form
 
     private int SpawnSteamWindow(bool unrelatedInstallation)
     {
-        string baseDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        string fixturePrefix = Path.Combine(Path.GetFullPath(Path.GetTempPath()), "CloseMeansExit-steam-");
+        string baseDirectory = ApplicationTargetSmokeTests.ExpandFixturePath(AppContext.BaseDirectory);
+        string fixturePrefix = Path.Combine(ApplicationTargetSmokeTests.ExpandFixturePath(Path.GetTempPath()), "CloseMeansExit-steam-");
         if (!baseDirectory.StartsWith(fixturePrefix, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(Path.GetFileName(Environment.ProcessPath), "Steam.exe", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Steam 形态测试只允许从专用临时夹具目录启动。");
@@ -247,24 +251,39 @@ internal sealed class TestFixtureForm : Form
             child.Close();
         }
 
-        foreach (Process helper in _helperProcesses)
+        CleanupHelpers();
+
+        Close();
+        Application.ExitThread();
+    }
+
+    private bool CleanupHelpers()
+    {
+        bool cleaned = true;
+        foreach (Process helper in _helperProcesses.ToArray())
         {
             try
             {
                 if (!helper.HasExited)
                 {
                     helper.Kill();
+                    if (!helper.WaitForExit(2000))
+                    {
+                        cleaned = false;
+                        continue;
+                    }
                 }
             }
-            catch (InvalidOperationException)
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                // An already-exited test helper needs no cleanup.
+                cleaned = false;
+                continue;
             }
 
             helper.Dispose();
+            _helperProcesses.Remove(helper);
         }
 
-        Close();
-        Application.ExitThread();
+        return cleaned;
     }
 }

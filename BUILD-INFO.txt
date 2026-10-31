@@ -1,4 +1,4 @@
-CloseMeansExit 0.2.2-beta.1 — Beta 测试版（源码说明）
+CloseMeansExit 0.2.2-beta.2 — Beta 测试版（源码说明）
 日期：2026-10-31
 目前仅实现基本功能，真实应用兼容性与使用体验仍在完善中。
 觉得好用，别忘了给项目点个 Star ⭐！
@@ -10,4 +10,4 @@ CloseMeansExit 0.2.2-beta.1 — Beta 测试版（源码说明）
 scripts/publish.ps1 为每个便携包生成独立 BUILD-INFO.txt，记录对应版本、源码提交、源码状态、SDK、EXE SHA-256 与构建时间。
 公开 Beta 构建结果以对应 GitHub Actions 与 Release 记录为准。
 运行数据保存在使用者本机；源码和发布包排除个人配置、活动日志、凭据和构建缓存。
-详见 README.md、docs/RELEASE-0.2.2-beta.1.md、docs/VALIDATION-0.2.2.md 与 docs/TESTING.md。
+详见 README.md、docs/RELEASE-0.2.2-beta.2.md、docs/VALIDATION-0.2.2.md 与 docs/TESTING.md。
