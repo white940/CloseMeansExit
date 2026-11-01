@@ -93,7 +93,7 @@ try {
         "Source commit: $sourceCommit",
         "Source state: $sourceState",
         "CloseMeansExit.exe SHA-256: $executableHash",
-        'Validation scope: docs/VALIDATION-0.2.2.md and docs/TESTING.md; see GitHub Actions for this build.',
+        'Validation scope: docs/TESTING.md and the matching release notes; see GitHub Actions for this build.',
         'Packaging does not itself run acceptance tests. ARM64 and real-app physical input require separate verification.',
         'Preview-Notification.cmd uses synthetic data and does not monitor, end processes, or save settings.'
     )

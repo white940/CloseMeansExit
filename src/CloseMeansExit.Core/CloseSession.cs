@@ -66,6 +66,11 @@ public sealed class CloseSession
 
         bool armedAtClick = MatchesEnabled(CapturedRule);
 
+        if (Observation.Evidence == CloseEvidence.BlacklistedBackground && !armedAtClick)
+        {
+            return Finish(DecisionKind.Ignore, "后台自动结束需要已启用且路径匹配的黑名单规则。");
+        }
+
         if (armedAtClick && (!MatchesEnabled(currentRule) ||
             currentRule!.IncludeChildren != CapturedRule!.IncludeChildren ||
             currentRule.UseCustomCloseZone != CapturedRule.UseCustomCloseZone))
@@ -81,6 +86,11 @@ public sealed class CloseSession
 
         if (snapshot.HasVisibleWindows)
         {
+            if (Observation.Evidence == CloseEvidence.BlacklistedBackground)
+            {
+                return Finish(DecisionKind.Ignore, "应用有窗口或保存提示，取消本次后台自动结束。");
+            }
+
             if (_hiddenSince.HasValue)
             {
                 return Finish(DecisionKind.Ignore, "应用窗口或保存提示重新出现。");
@@ -111,7 +121,9 @@ public sealed class CloseSession
                     : "点击关闭后进程仍在运行，可由用户加入黑名单。");
         }
 
-        return Finish(DecisionKind.Terminate, "已确认关闭操作、黑名单及持续隐藏的原进程。");
+        return Finish(DecisionKind.Terminate, Observation.Evidence == CloseEvidence.BlacklistedBackground
+            ? "已确认黑名单及持续无可见窗口的后台进程。"
+            : "已确认关闭操作、黑名单及持续隐藏的原进程。");
     }
 
     private bool MatchesEnabled(AppRule? rule) =>

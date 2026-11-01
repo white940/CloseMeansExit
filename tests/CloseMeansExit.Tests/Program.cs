@@ -260,6 +260,97 @@ Advance(sourceUnlistedAtClick, hidden, 5, rule);
 Equal(DecisionKind.Candidate, Advance(sourceUnlistedAtClick, hidden, 6, rule).Kind,
     "adding a rule during a slow close still cannot arm the past click");
 
+CloseSession NewBackgroundSession(AppRule? captured = null) =>
+    NewSession(captured, CloseEvidence.BlacklistedBackground);
+
+CloseSession background = NewBackgroundSession(rule);
+Equal(DecisionKind.Wait, Advance(background, hidden, 0, rule).Kind,
+    "enabled blacklist starts a fresh background observation without input or custom-close permission");
+Equal(DecisionKind.Wait, Advance(background, hidden, 2.99, rule).Kind,
+    "automatic background cleanup still waits three seconds");
+Equal(DecisionKind.Terminate, Advance(background, hidden, 3, rule).Kind,
+    "a listed hidden process is ended without a close-button signal");
+Equal(DecisionKind.Ignore, Advance(background, hidden, 4, rule).Kind,
+    "one background observation can only emit termination once");
+
+foreach (AppRule? captured in new AppRule?[]
+{
+    null, rule with { Enabled = false }, rule with { ExecutablePath = @"D:\Other\Example.exe" }
+})
+{
+    CloseSession unauthorizedBackground = NewBackgroundSession(captured);
+    Equal(DecisionKind.Ignore, Advance(unauthorizedBackground, hidden, 0, rule).Kind,
+        "background cleanup requires an enabled exact-path rule at observation time");
+    Equal(DecisionKind.Ignore, Advance(unauthorizedBackground, hidden, 4, rule).Kind,
+        "a later valid rule cannot revive an unauthorized background observation");
+}
+
+CloseSession backgroundWindow = NewBackgroundSession(rule);
+Equal(DecisionKind.Ignore, Advance(backgroundWindow, originalVisible, 0, rule).Kind,
+    "any visible window immediately cancels background cleanup even with the original-window flag");
+Equal(DecisionKind.Ignore, Advance(backgroundWindow, hidden, 3, rule).Kind,
+    "a canceled background observation cannot be replayed when the window later hides");
+CloseSession backgroundReturned = NewBackgroundSession(rule);
+Advance(backgroundReturned, hidden, 0, rule);
+Equal(DecisionKind.Ignore, Advance(backgroundReturned, visible, 1, rule).Kind,
+    "a window appearing during automatic cleanup cancels the pending attempt");
+Equal(DecisionKind.Ignore, Advance(backgroundReturned, hidden, 3, rule).Kind,
+    "hiding a returned window requires a new background observation");
+
+CloseSession backgroundLateHide = NewBackgroundSession(rule);
+Equal(DecisionKind.Wait, Advance(backgroundLateHide, hidden, 2.9, rule).Kind,
+    "automatic cleanup measures hidden stability from the first reliable hidden probe");
+Equal(DecisionKind.Wait, Advance(backgroundLateHide, hidden, 3, rule).Kind,
+    "the three-second grace alone cannot bypass hidden stability");
+Equal(DecisionKind.Terminate, Advance(backgroundLateHide, hidden, 3.9, rule).Kind,
+    "automatic cleanup requires both grace and a full stable hidden second");
+
+foreach ((AppRule? replacement, string description) in new (AppRule?, string)[]
+{
+    (null, "removed rule"),
+    (rule with { Enabled = false }, "disabled rule"),
+    (rule with { IncludeChildren = true }, "changed termination scope"),
+    (rule with { UseCustomCloseZone = true }, "changed rule settings")
+})
+{
+    CloseSession changedBackground = NewBackgroundSession(rule);
+    Advance(changedBackground, hidden, 0, rule);
+    Equal(DecisionKind.Ignore, Advance(changedBackground, hidden, 1, replacement).Kind,
+        description + " cancels pending automatic cleanup");
+    Equal(DecisionKind.Ignore, Advance(changedBackground, hidden, 3, rule).Kind,
+        description + " cannot be undone to reuse the canceled background attempt");
+}
+
+foreach ((ProcessSnapshot snapshot, string description) in new[]
+{
+    (hidden with { IsAlive = false }, "natural exit"),
+    (hidden with { IdentityMatches = false }, "reused PID or changed identity"),
+    (hidden with { Reliable = false }, "unreliable process/window probe")
+})
+{
+    CloseSession invalidBackground = NewBackgroundSession(rule);
+    Advance(invalidBackground, hidden, 0, rule);
+    Equal(DecisionKind.Ignore, Advance(invalidBackground, snapshot, 1, rule).Kind,
+        description + " cancels automatic cleanup");
+    Equal(DecisionKind.Ignore, Advance(invalidBackground, hidden, 3, rule).Kind,
+        description + " cannot recover the canceled automatic cleanup attempt");
+}
+
+CloseSession pausedBackground = NewBackgroundSession(rule);
+Advance(pausedBackground, hidden, 0, rule);
+Equal(DecisionKind.Ignore, Advance(pausedBackground, hidden, 1, rule, paused: true).Kind,
+    "pausing cancels automatic cleanup already in its grace period");
+Equal(DecisionKind.Ignore, Advance(pausedBackground, hidden, 3, rule).Kind,
+    "resuming must create a fresh background observation");
+CloseSession expiredBackground = NewBackgroundSession(rule);
+Advance(expiredBackground, hidden, 0, rule);
+Equal(DecisionKind.Ignore, Advance(expiredBackground, hidden, 10, rule).Kind,
+    "automatic cleanup never uses an expired process observation");
+CloseSession rollbackBackground = NewBackgroundSession(rule);
+Advance(rollbackBackground, hidden, 1, rule);
+Equal(DecisionKind.Ignore, Advance(rollbackBackground, hidden, .5, rule).Kind,
+    "clock rollback cancels automatic cleanup");
+
 Equal(@"C:\Apps\Example\Example.exe", RulePaths.Normalize(@"c:/Apps/Other/../Example/./Example.exe"), "normalize Windows path");
 Equal(true, RulePaths.Equal(@"\\?\C:\Apps\Example.exe", @"c:\apps\EXAMPLE.exe"), "extended drive prefix");
 Equal(true, RulePaths.Equal(@"\\?\UNC\server\share\App.exe", @"\\SERVER\share\app.exe"), "extended UNC prefix");

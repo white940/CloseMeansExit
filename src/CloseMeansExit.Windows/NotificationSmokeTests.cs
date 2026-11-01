@@ -44,11 +44,10 @@ internal static class NotificationSmokeTests
 
             Button add = Button(notice, "加入黑名单");
             Button dismiss = Button(notice, "暂不处理");
-            CheckBox customClose = Descendants(notice).OfType<CheckBox>().Single(c => c.Text.StartsWith("兼容自绘", StringComparison.Ordinal));
-            Require(customClose.Visible && !customClose.Checked && !notice.UseCustomCloseZone,
-                "弱证据通知应显示默认关闭的自绘兼容选项。");
-            customClose.Checked = true;
-            Require(notice.UseCustomCloseZone, "自绘兼容选项未返回用户选择。");
+            Require(text.Any(t => t.Contains("当前及以后的无窗口后台实例会自动结束", StringComparison.Ordinal)),
+                "加入前应说明当前后台实例也会自动结束。");
+            Require(!Descendants(notice).OfType<CheckBox>().Any(c => c.Text.Contains("自绘", StringComparison.Ordinal)) &&
+                !notice.UseCustomCloseZone, "后台自动处理不应要求选择关闭按钮兼容。");
             Require(add.Enabled && dismiss.Enabled, "通知初始按钮不可用。");
             notice.SetPendingCount(2);
             Require(Descendants(notice).Any(c => c.Visible && c.Text == "另有 2 个应用等待确认"), "通知未显示其他待确认应用。");
@@ -56,14 +55,14 @@ internal static class NotificationSmokeTests
             Require(!Descendants(notice).Any(c => c.Visible && c.Text.Contains("个应用等待确认", StringComparison.Ordinal)), "清空队列后仍显示等待数量。");
 
             add.PerformClick();
-            Require(adds == 1 && !add.Enabled && !dismiss.Enabled && !customClose.Enabled,
-                "保存请求未禁用按钮和自绘兼容选项。");
+            Require(adds == 1 && !add.Enabled && !dismiss.Enabled,
+                "保存请求未禁用操作按钮。");
             add.PerformClick();
             dismiss.PerformClick();
             Require(adds == 1 && dismissals == 0 && !notice.IsDisposed, "保存中重复点击产生了额外操作。");
             notice.ShowSaveFailure("测试：磁盘暂时不可写");
-            Require(add.Enabled && dismiss.Enabled && customClose.Enabled && notice.UseCustomCloseZone && !notice.IsDisposed,
-                "保存失败后通知未恢复重试或遗失兼容选项。");
+            Require(add.Enabled && dismiss.Enabled && !notice.IsDisposed,
+                "保存失败后通知未恢复重试。");
             Require(Descendants(notice).Any(c => c.Visible && c.Text.Contains("保存失败", StringComparison.Ordinal)), "保存失败信息不可见。");
             add.PerformClick();
             Require(adds == 2, "保存失败后不能再次请求加入。");
@@ -97,24 +96,9 @@ internal static class NotificationSmokeTests
         using (var notice = new ResidencyNoticeForm(observation with { Evidence = CloseEvidence.StandardCloseButton }, 1, false))
         {
             Show(notice);
-            Require(!Descendants(notice).OfType<CheckBox>().Single(c => c.Text.StartsWith("兼容自绘", StringComparison.Ordinal)).Visible && !notice.UseCustomCloseZone,
-                "已确认关闭证据不应显示或自动开启自绘兼容。");
+            Require(Descendants(notice).Any(c => c.Text.Contains("当前及以后的无窗口后台实例会自动结束", StringComparison.Ordinal)),
+                "标准关闭来源也应明确加入后的后台自动处理行为。");
             Button(notice, "暂不处理").PerformClick();
-            Application.DoEvents();
-        }
-
-        using (var notice = new ResidencyNoticeForm(observation, 1, false, enableCloseCompatibility: true))
-        {
-            int adds = 0;
-            notice.AddRequested += () => adds++;
-            Show(notice);
-            Require(Descendants(notice).Any(c => c.Text.Contains("已在黑名单中", StringComparison.Ordinal)),
-                "已有规则的兼容提示未说明未识别关闭动作。");
-            Require(notice.UseCustomCloseZone && !Descendants(notice).OfType<CheckBox>().Single(c => c.Text.StartsWith("兼容自绘", StringComparison.Ordinal)).Visible,
-                "明确的兼容启用按钮应返回兼容选择，不能伪装成普通加入。");
-            Button(notice, "启用关闭按钮兼容").PerformClick();
-            Require(adds == 1, "兼容修复操作没有触发保存。");
-            notice.Close();
             Application.DoEvents();
         }
 
@@ -132,6 +116,31 @@ internal static class NotificationSmokeTests
             Require(notice.IncludeChildren, "Steam子进程选择没有返回给保存操作。");
             Button(notice, "暂不处理").PerformClick();
             Application.DoEvents();
+        }
+
+        using (var notice = new ResidencyNoticeForm(observation with
+        {
+            Process = observation.Process with { ExecutablePath = @"C:\Apps\Steam\Steam.exe" }
+        }, 1, true, existingIncludeChildren: true))
+        {
+            Show(notice);
+            Require(notice.IncludeChildren, "恢复规则时不得遗失已明确选择的子进程范围。");
+            Button(notice, "暂不处理").PerformClick();
+            Application.DoEvents();
+        }
+
+        var originalRule = new AppRule
+        {
+            ExecutablePath = observation.Process.ExecutablePath,
+            IncludeChildren = true,
+            UseCustomCloseZone = true
+        };
+        using (var dialog = new RuleDialog(originalRule))
+        {
+            Require(dialog.Rule.IncludeChildren && dialog.Rule.UseCustomCloseZone,
+                "编辑规则时应保留原结束范围及旧配置字段。");
+            Require(!Descendants(dialog).OfType<CheckBox>().Any(c => c.Text.Contains("自绘", StringComparison.Ordinal)),
+                "后台自动处理不应要求用户设置自绘关闭区域。");
         }
     }
 

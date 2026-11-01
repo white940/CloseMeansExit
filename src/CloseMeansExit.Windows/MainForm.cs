@@ -66,7 +66,7 @@ internal sealed class MainForm : Form
 
         var header = new Panel { Dock = DockStyle.Top, Height = 100, Padding = new Padding(22, 15, 22, 10), BackColor = Color.FromArgb(242, 247, 244) };
         header.Controls.Add(new Label { Text = "叉掉就退", Font = new Font(Font.FontFamily, 19, FontStyle.Bold), AutoSize = true, Location = new Point(22, 12) });
-        header.Controls.Add(new Label { Text = "关掉窗口，就让应用退场。由你决定哪些程序必须退出。", AutoSize = true, Location = new Point(24, 58), ForeColor = Color.FromArgb(70, 80, 74) });
+        header.Controls.Add(new Label { Text = "将应用加入黑名单，自动结束无可见窗口的后台进程。", AutoSize = true, Location = new Point(24, 58), ForeColor = Color.FromArgb(70, 80, 74) });
 
         var controls = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 53, Padding = new Padding(16, 7, 10, 5), WrapContents = false };
         controls.Controls.AddRange([_state, _pause, _startup, Button("打开配置与日志", (_, _) => OpenDataDirectory()), Button("退出工具", (_, _) => ExitTool())]);
@@ -78,7 +78,7 @@ internal sealed class MainForm : Form
         ConfigureDiscoveryGrid();
         ConfigureRuleGrid();
         ConfigureWindowGrid();
-        tabs.TabPages.Add(Page("发现记录", "记录窗口消失后仍在运行的应用。加入黑名单后，从下一次关闭操作开始生效。", _discoveryGrid,
+        tabs.TabPages.Add(Page("发现记录", "加入并启用黑名单后，当前及以后的无窗口后台实例会自动结束。", _discoveryGrid,
             Button("将所选应用加入黑名单", (_, _) => EditRule(SelectedDiscoveryPath())),
             Button("清空记录", (_, _) => _discoveries.Clear())));
         tabs.TabPages.Add(Page("黑名单", "仅对启用的路径规则执行。强制结束可能丢失未保存内容、下载或同步任务。", _ruleGrid,
@@ -109,8 +109,8 @@ internal sealed class MainForm : Form
                 _state.Text = "监测未启动";
                 _pause.Enabled = false;
                 _tray.Text = "叉掉就退 · 监测未启动";
-                AppendLog($"输入监测未能启动：{e.Message}");
-                MessageBox.Show(this, $"无法启动关闭按钮监测：{e.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                AppendLog($"监测未能启动：{e.Message}");
+                MessageBox.Show(this, $"无法启动后台监测：{e.Message}", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             await RefreshWindowsAsync();
         };
@@ -134,7 +134,6 @@ internal sealed class MainForm : Form
         Column(_ruleGrid, "Application", "应用", 160);
         Column(_ruleGrid, "State", "状态", 80);
         Column(_ruleGrid, "Scope", "结束范围", 110);
-        Column(_ruleGrid, "Custom", "自绘兼容", 100);
         Column(_ruleGrid, "Path", "程序路径", 380, true);
         _ruleGrid.DataSource = _ruleRows;
         _ruleGrid.CellDoubleClick += (_, _) => EditRule(SelectedRulePath());
@@ -245,7 +244,7 @@ internal sealed class MainForm : Form
             _settings = next;
             _monitor.SetRules(rules);
             RefreshRules();
-            AppendLog("黑名单已保存；规则从下一次关闭操作开始生效。");
+            AppendLog("黑名单已保存；启用的规则开始监测当前及以后的后台实例。");
             error = "";
             return true;
         }
@@ -257,18 +256,16 @@ internal sealed class MainForm : Form
         if (_exiting || _monitor.Paused) return new(false, "监测已暂停，未更改黑名单。");
         if (IsProtected(path)) return new(false, "不能将系统程序或工具自身加入黑名单。");
         var old = _settings.Rules.FirstOrDefault(r => RulePaths.Equal(r.ExecutablePath, path));
-        if (old?.Enabled == true && (!useCustomCloseZone || old.UseCustomCloseZone) &&
-            old.IncludeChildren == includeChildren)
+        if (old?.Enabled == true && old.IncludeChildren == includeChildren)
             return new(true, "该应用已在黑名单中。");
         var rule = (old ?? new AppRule { ExecutablePath = RulePaths.Normalize(path) }) with
         {
             Enabled = true,
-            IncludeChildren = includeChildren,
-            UseCustomCloseZone = old?.UseCustomCloseZone == true || useCustomCloseZone
+            IncludeChildren = includeChildren
         };
         var rules = _settings.Rules.Where(r => !RulePaths.Equal(r.ExecutablePath, path)).Append(rule).ToList();
         return TrySaveRules(rules, out string error)
-            ? new(true, "已加入黑名单；下一次关闭开始生效。") : new(false, error);
+            ? new(true, "已加入黑名单；无可见窗口的后台实例将自动结束。") : new(false, error);
     }
 
     private void RefreshRules()
@@ -294,7 +291,7 @@ internal sealed class MainForm : Form
     {
         if (!_monitorAvailable)
         {
-            MessageBox.Show(this, "关闭按钮监测尚未启动，请退出工具后重新运行。", Text);
+            MessageBox.Show(this, "后台监测尚未启动，请退出工具后重新运行。", Text);
             return;
         }
         _monitor.SetPaused(!_monitor.Paused);
@@ -396,7 +393,6 @@ internal sealed class MainForm : Form
         public string Path => rule.ExecutablePath;
         public string State => rule.Enabled ? "启用" : "停用";
         public string Scope => rule.IncludeChildren ? "进程及子进程" : "仅主进程";
-        public string Custom => rule.UseCustomCloseZone ? "已开启" : "关闭";
     }
     private sealed class WindowRow(WindowEntry entry)
     {

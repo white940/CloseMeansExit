@@ -14,6 +14,7 @@ internal sealed class MonitorCoordinator : IDisposable
     private readonly CloseInputMonitor _input;
     private readonly ConcurrentQueue<(CloseObservation Observation, AppRule? Rule, long Version)> _queue = new();
     private readonly Dictionary<ProcessIdentity, (CloseSession Session, long Version)> _pending = [];
+    private readonly Dictionary<ProcessIdentity, (long Version, DateTimeOffset After)> _backgroundRetries = [];
     private readonly CancellationTokenSource _stop = new();
     private readonly object _ruleLock = new();
     private Dictionary<string, (AppRule Rule, DateTimeOffset Since, long Version)> _rules = new(StringComparer.OrdinalIgnoreCase);
@@ -22,6 +23,7 @@ internal sealed class MonitorCoordinator : IDisposable
     private Dictionary<ProcessIdentity, WindowEntry> _previous = [];
     private volatile bool _paused;
     private int _reset;
+    private int _scanRequested;
     private Task? _worker;
     private DateTimeOffset _lastScan = DateTimeOffset.MinValue;
 
@@ -46,7 +48,7 @@ internal sealed class MonitorCoordinator : IDisposable
             _acceptObservationsSince = DateTimeOffset.UtcNow;
             Interlocked.Exchange(ref _reset, 1);
         }
-        Log?.Invoke(paused ? "已暂停监测；所有待执行操作已取消。" : "已恢复监测。规则从新的关闭操作开始生效。");
+        Log?.Invoke(paused ? "已暂停监测；所有待执行操作已取消。" : "已恢复监测，将重新核验黑名单中的后台进程。");
     }
 
     public void SetRules(IEnumerable<AppRule> rules)
@@ -62,6 +64,7 @@ internal sealed class MonitorCoordinator : IDisposable
                 replacement[path] = unchanged ? old : (rule, DateTimeOffset.UtcNow, ++_nextVersion);
             }
             _rules = replacement;
+            Interlocked.Exchange(ref _scanRequested, 1);
         }
     }
 
@@ -79,9 +82,15 @@ internal sealed class MonitorCoordinator : IDisposable
         // ready, so a close immediately after startup is not lost by polling.
         _previous = _platform.ListWindows().GroupBy(w => w.Process).ToDictionary(g => g.Key, g => g.First());
         _lastScan = DateTimeOffset.UtcNow;
-        _input.Start();
+        Interlocked.Exchange(ref _scanRequested, 1);
+        try { _input.Start(); }
+        catch (Exception error) when (error is InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception)
+        {
+            _input.Dispose();
+            Log?.Invoke($"关闭动作监听不可用，后台自动扫描将继续运行：{error.Message}");
+        }
         _worker = Task.Run(RunAsync);
-        Log?.Invoke("监测已启动。发现未加入黑名单的后台驻留应用时会提醒确认，首次发现不会结束进程。");
+        Log?.Invoke("监测已启动。黑名单中没有可见窗口的后台进程将自动结束；未加入的应用只提醒确认。");
     }
 
     internal void OnObservation(CloseObservation observation)
@@ -90,6 +99,11 @@ internal sealed class MonitorCoordinator : IDisposable
         lock (_ruleLock)
         {
             if (_paused || observation.At < _acceptObservationsSince) return;
+            // Listed applications are governed by fresh background scans,
+            // including instances that were already hidden when added.
+            if (observation.Evidence == CloseEvidence.BlacklistedBackground ||
+                (_rules.TryGetValue(RulePaths.Normalize(observation.Process.ExecutablePath), out var current)
+                    && current.Rule.Enabled)) return;
             long version = 0;
             if (_rules.TryGetValue(RulePaths.Normalize(observation.Process.ExecutablePath), out var entry)
                 && entry.Since <= observation.At)
@@ -133,12 +147,14 @@ internal sealed class MonitorCoordinator : IDisposable
         if (Interlocked.Exchange(ref _reset, 0) != 0)
         {
             _pending.Clear();
+            _backgroundRetries.Clear();
             _previous.Clear();
+            _lastScan = DateTimeOffset.MinValue;
             while (_queue.TryDequeue(out _)) { }
         }
         if (_paused) return;
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (now - _lastScan >= TimeSpan.FromSeconds(2))
+        if (Interlocked.Exchange(ref _scanRequested, 0) != 0 || now - _lastScan >= TimeSpan.FromSeconds(2))
         {
             // Only loss of all visible windows creates a weak observation. It never authorizes a kill.
             var current = _platform.ListWindows()
@@ -149,11 +165,19 @@ internal sealed class MonitorCoordinator : IDisposable
                     OnObservation(new CloseObservation(pair.Key, pair.Value.Title, CloseEvidence.WindowDisappeared, now));
             }
             _previous = current;
+            ScanBlacklistedProcesses();
             _lastScan = now;
         }
 
         while (_queue.TryDequeue(out var item))
         {
+            lock (_ruleLock)
+            {
+                // An unlisted observation may have been queued just before
+                // its rule was enabled. It cannot displace the fresh scan.
+                if (_rules.TryGetValue(RulePaths.Normalize(item.Observation.Process.ExecutablePath), out var active)
+                    && active.Rule.Enabled) continue;
+            }
             if (_pending.TryGetValue(item.Observation.Process, out var old))
             {
                 if (old.Session.Observation.Evidence != CloseEvidence.WindowDisappeared
@@ -206,9 +230,58 @@ internal sealed class MonitorCoordinator : IDisposable
                 ended = _platform.TryTerminate(pair.Key, children, out error);
             }
             string result = ended ? "已按黑名单结束" : $"未结束：{error}";
+            if (session.Observation.Evidence == CloseEvidence.BlacklistedBackground)
+            {
+                // Keep a bounded cooldown even after a successful native call
+                // because process teardown is asynchronous. New identities
+                // and changed rules receive their own fresh grace period.
+                _backgroundRetries[pair.Key] = (pair.Value.Version, DateTimeOffset.UtcNow.AddSeconds(10));
+            }
             Discovered?.Invoke(new DiscoveryRecord(session.Observation, snapshot.WorkingSetBytes, result,
                 ended ? DiscoveryKind.Terminated : DiscoveryKind.TerminationFailed));
             Log?.Invoke($"{Path.GetFileName(pair.Key.ExecutablePath)}：{result}");
+        }
+    }
+
+    private void ScanBlacklistedProcesses()
+    {
+        Dictionary<string, (AppRule Rule, DateTimeOffset Since, long Version)> rules;
+        lock (_ruleLock)
+        {
+            if (_paused) return;
+            rules = _rules.Where(pair => pair.Value.Rule.Enabled)
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        }
+
+        var identities = _platform.ListRuleProcesses(rules.Keys);
+        var current = identities.ToHashSet();
+        foreach (var identity in _backgroundRetries.Keys.ToArray())
+        {
+            if (!current.Contains(identity) || !rules.TryGetValue(RulePaths.Normalize(identity.ExecutablePath), out var rule)
+                || _backgroundRetries[identity].Version != rule.Version)
+                _backgroundRetries.Remove(identity);
+        }
+
+        foreach (var identity in identities)
+        {
+            var entry = rules[RulePaths.Normalize(identity.ExecutablePath)];
+            if (_pending.TryGetValue(identity, out var pending) && pending.Version == entry.Version &&
+                pending.Session.Observation.Evidence == CloseEvidence.BlacklistedBackground) continue;
+            if (_backgroundRetries.TryGetValue(identity, out var retry) && retry.Version == entry.Version &&
+                DateTimeOffset.UtcNow < retry.After) continue;
+
+            var snapshot = _platform.Probe(identity, entry.Rule.IncludeChildren);
+            if (!snapshot.IsAlive || !snapshot.IdentityMatches || !snapshot.Reliable || snapshot.HasVisibleWindows) continue;
+            DateTimeOffset at = DateTimeOffset.UtcNow;
+            lock (_ruleLock)
+            {
+                if (_paused || at < _acceptObservationsSince ||
+                    !_rules.TryGetValue(RulePaths.Normalize(identity.ExecutablePath), out var active) ||
+                    active.Version != entry.Version || active.Rule != entry.Rule || active.Since > at) continue;
+                var observation = new CloseObservation(identity, "后台进程", CloseEvidence.BlacklistedBackground, at);
+                _pending[identity] = (new CloseSession(observation, entry.Rule), entry.Version);
+            }
+            Log?.Invoke($"{Path.GetFileName(identity.ExecutablePath)}：发现黑名单后台进程，正在等待并核验窗口状态。");
         }
     }
 

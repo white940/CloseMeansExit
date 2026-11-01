@@ -5,7 +5,8 @@ public enum CloseEvidence
     StandardCloseButton,
     AltF4,
     CustomTitleBarZone,
-    WindowDisappeared
+    WindowDisappeared,
+    BlacklistedBackground
 }
 
 public sealed record ProcessIdentity(int Pid, long StartTimeUtcTicks, string ExecutablePath);

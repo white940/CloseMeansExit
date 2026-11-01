@@ -18,10 +18,7 @@ internal sealed class ResidencyNoticeForm : Form
     private readonly Label _risk;
     private readonly Label _pending;
     private readonly Label _error;
-    private readonly CheckBox _customCloseZone;
     private readonly CheckBox _includeChildren;
-    private readonly bool _allowCustomCloseZone;
-    private readonly bool _enableCloseCompatibility;
     private readonly Button _add;
     private readonly Button _dismiss;
     private readonly ToolTip _toolTip = new();
@@ -37,13 +34,12 @@ internal sealed class ResidencyNoticeForm : Form
 
     public event Action? AddRequested;
     public event Action? DismissRequested;
-    public bool UseCustomCloseZone => _enableCloseCompatibility || (_allowCustomCloseZone && _customCloseZone.Checked);
+    public bool UseCustomCloseZone => false;
     public bool IncludeChildren => _includeChildren.Checked;
 
     public ResidencyNoticeForm(CloseObservation observation, long workingSetBytes, bool reenableExistingRule,
-        bool enableCloseCompatibility = false, bool existingIncludeChildren = false)
+        bool existingIncludeChildren = false)
     {
-        _enableCloseCompatibility = enableCloseCompatibility;
         Text = "叉掉就退 · 后台驻留提示";
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -73,9 +69,7 @@ internal sealed class ResidencyNoticeForm : Form
         _application.Font = _applicationFont;
         string question = reenableExistingRule ? "要恢复启用它的黑名单规则吗？" : "要将这个应用加入黑名单吗？";
         _description = TextLabel(
-            enableCloseCompatibility
-                ? "这个应用已在黑名单中，但本次只确认窗口消失，未识别到关闭动作。要启用右上角关闭按钮兼容吗？"
-                : observation.Evidence == CloseEvidence.WindowDisappeared
+            observation.Evidence == CloseEvidence.WindowDisappeared
                 ? "窗口已消失，进程仍在运行。" + question
                 : "检测到关闭窗口后，应用仍驻留后台。" + question, 12);
         _memory = TextLabel(workingSetBytes > 0
@@ -95,17 +89,6 @@ internal sealed class ResidencyNoticeForm : Form
             UseMnemonic = false,
             AccessibleName = "应用完整路径"
         };
-        _allowCustomCloseZone = observation.Evidence == CloseEvidence.WindowDisappeared;
-        _customCloseZone = new CheckBox
-        {
-            Text = "兼容自绘关闭按钮（高级）",
-            AutoSize = true,
-            Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            Checked = false,
-            Visible = _allowCustomCloseZone && !enableCloseCompatibility,
-            Margin = new Padding(0, 0, 0, 12),
-            UseMnemonic = false
-        };
         _includeChildren = new CheckBox
         {
             Text = "同时结束子进程（包括 Steam 启动的游戏）",
@@ -116,11 +99,7 @@ internal sealed class ResidencyNoticeForm : Form
             Margin = new Padding(0, 0, 0, 12),
             UseMnemonic = false
         };
-        _risk = TextLabel(enableCloseCompatibility
-            ? "仅对以后的关闭操作生效。兼容按右上角关闭区域判断，请先核对按钮位置；强制结束可能中断下载或同步。"
-            : observation.Evidence == CloseEvidence.WindowDisappeared
-                ? "本次尚未识别到关闭按钮。要用右上角叉号自动退出，请勾选关闭按钮兼容；也可使用 Alt+F4。强制结束可能中断下载或同步。"
-                : "加入后，识别到下一次关闭操作时自动结束；可能中断下载或同步。", 0);
+        _risk = TextLabel("加入后，当前及以后的无窗口后台实例会自动结束。可见或最小化窗口仍受保护；强制结束可能中断下载或同步。", 0);
         _risk.ForeColor = Color.FromArgb(99, 107, 103);
         _pending = TextLabel("", 0);
         _pending.ForeColor = Color.FromArgb(99, 107, 103);
@@ -135,13 +114,11 @@ internal sealed class ResidencyNoticeForm : Form
         _toolTip.SetToolTip(_application, executablePath);
         _toolTip.SetToolTip(_path, executablePath);
         _toolTip.SetToolTip(_memory, "检测时的进程工作集；不代表结束应用后精确释放的物理内存。");
-        _toolTip.SetToolTip(_customCloseZone,
-            "开启后，将窗口右上角 48×40 逻辑像素视为关闭区域。请先核对应用布局，避免最小化、设置等按钮落在该区域。");
 
         _content = new TableLayoutPanel
         {
             ColumnCount = 1,
-            RowCount = 9,
+            RowCount = 8,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Dock = DockStyle.Top,
@@ -153,11 +130,10 @@ internal sealed class ResidencyNoticeForm : Form
         _content.Controls.Add(_description, 0, 1);
         _content.Controls.Add(_memory, 0, 2);
         _content.Controls.Add(_path, 0, 3);
-        _content.Controls.Add(_customCloseZone, 0, 4);
-        _content.Controls.Add(_includeChildren, 0, 5);
-        _content.Controls.Add(_risk, 0, 6);
-        _content.Controls.Add(_pending, 0, 7);
-        _content.Controls.Add(_error, 0, 8);
+        _content.Controls.Add(_includeChildren, 0, 4);
+        _content.Controls.Add(_risk, 0, 5);
+        _content.Controls.Add(_pending, 0, 6);
+        _content.Controls.Add(_error, 0, 7);
         _body = new Panel
         {
             Dock = DockStyle.Fill,
@@ -168,7 +144,7 @@ internal sealed class ResidencyNoticeForm : Form
 
         _add = new Button
         {
-            Text = enableCloseCompatibility ? "启用关闭按钮兼容" : reenableExistingRule ? "恢复启用" : "加入黑名单",
+            Text = reenableExistingRule ? "恢复启用" : "加入黑名单",
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Padding = new Padding(13, 5, 13, 5),
@@ -177,7 +153,7 @@ internal sealed class ResidencyNoticeForm : Form
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             UseVisualStyleBackColor = false,
-            AccessibleDescription = "保存规则；从下一次关闭操作开始生效。"
+            AccessibleDescription = "保存并启用规则；经短暂等待后自动结束无可见窗口的后台实例。"
         };
         _add.FlatAppearance.BorderSize = 0;
         _dismiss = new Button
@@ -222,7 +198,6 @@ internal sealed class ResidencyNoticeForm : Form
         _busy = busy;
         _add.Enabled = !busy;
         _dismiss.Enabled = !busy;
-        _customCloseZone.Enabled = !busy;
         _includeChildren.Enabled = !busy;
         ControlBox = !busy;
         UseWaitCursor = busy;
@@ -400,7 +375,6 @@ internal sealed class ResidencyNoticeForm : Form
             {
                 label.MaximumSize = new Size(contentWidth, 0);
             }
-            _customCloseZone.MaximumSize = new Size(contentWidth, 0);
             _includeChildren.MaximumSize = new Size(contentWidth, 0);
 
             _path.Height = Scaled(24);

@@ -155,7 +155,7 @@ internal static class SmokeTests
             Record($"PASS: all native smoke checks ({clock.Elapsed.TotalSeconds:F2}s)");
             Record("CHECK: coordinator and real notification pipeline");
             MonitorSmokeTests.Run(fixtureExecutable, Record);
-            Record("PASS: monitor discovery, notification persistence and subsequent-close termination");
+            Record("PASS: monitor discovery, notification persistence and automatic background cleanup");
             Record("CHECK: Steam-shaped main/helper process mapping");
             ApplicationTargetSmokeTests.Run(fixtureExecutable, Record);
             Record("PASS: verified main-process targeting and CEF window protection");

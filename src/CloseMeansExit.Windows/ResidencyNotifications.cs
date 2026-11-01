@@ -44,7 +44,7 @@ internal sealed class ResidencyNotifications : IDisposable
         string path = record.Observation.Process.ExecutablePath;
         if (!CanOffer(record.Observation))
         {
-            _log($"{Path.GetFileName(path)}：已在启用的黑名单中，本次未确认可执行的关闭动作；可检查自绘标题栏兼容设置。");
+            _log($"{Path.GetFileName(path)}：已在启用的黑名单中，将按后台状态自动处理。");
             return;
         }
         // A card already asking about this path is sufficient. Future close
@@ -76,8 +76,7 @@ internal sealed class ResidencyNotifications : IDisposable
     private bool CanOffer(CloseObservation observation)
     {
         AppRule? rule = _findRule(observation.Process.ExecutablePath);
-        return rule?.Enabled != true ||
-            (observation.Evidence == CloseEvidence.WindowDisappeared && !rule.UseCustomCloseZone);
+        return rule?.Enabled != true;
     }
 
     private async Task ShowNextAsync()
@@ -101,7 +100,6 @@ internal sealed class ResidencyNotifications : IDisposable
                 var current = notice with { WorkingSetBytes = snapshot.WorkingSetBytes };
                 var popup = new ResidencyNoticeForm(current.Observation, current.WorkingSetBytes,
                     _findRule(path) is { Enabled: false },
-                    _findRule(path) is { Enabled: true, UseCustomCloseZone: false },
                     _findRule(path)?.IncludeChildren == true);
                 _activeNotice = current;
                 _activeForm = popup;
@@ -151,8 +149,8 @@ internal sealed class ResidencyNotifications : IDisposable
             if (result.Success)
             {
                 _queue.Remove(path);
-                // Saving adds a future path rule. This method never terminates
-                // the process that produced the notice.
+                // The coordinator applies the saved rule to current and future
+                // background instances after revalidating their state.
                 CloseCurrent();
             }
             else

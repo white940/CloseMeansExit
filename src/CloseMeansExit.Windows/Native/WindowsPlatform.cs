@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using CloseMeansExit.Core;
@@ -31,6 +32,28 @@ public sealed class WindowsPlatform
         if (IsProtected(owner)) return owner;
         ProcessIdentity target = ApplicationTargetResolver.Resolve(owner);
         return IsProtected(target) ? owner : target;
+    }
+
+    public IReadOnlyList<ProcessIdentity> ListRuleProcesses(IEnumerable<string> executablePaths)
+    {
+        var paths = executablePaths.Select(RulePaths.Normalize).Where(path => path.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<int, ProcessIdentity>();
+        foreach (string name in paths.Select(path => Path.GetFileNameWithoutExtension(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            // Names reduce enumeration work only. Every candidate must match
+            // the complete configured path and a verified process identity.
+            foreach (Process process in Process.GetProcessesByName(name))
+            {
+                using (process)
+                {
+                    ProcessIdentity? identity = TryGetIdentity(process.Id);
+                    if (identity is not null && paths.Contains(identity.ExecutablePath) && !IsProtected(identity))
+                        result[identity.Pid] = identity;
+                }
+            }
+        }
+        return result.Values.ToArray();
     }
 
     public IReadOnlyList<WindowEntry> ListWindows()
